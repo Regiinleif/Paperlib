@@ -1,0 +1,4 @@
+# PaperLib dependencies
+anthropic>=0.40      # Official Claude API SDK (the RAG chat)
+pypdf>=4.0           # Extract text from PDF papers
+tkinterdnd2>=0.4     # Drag-and-drop files onto the drop box (optional but nice)

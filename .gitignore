@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Personal data — NEVER commit your papers or your API key
+/papers/*
+!/papers/.gitkeep
+/data/*
+!/data/.gitkeep
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
