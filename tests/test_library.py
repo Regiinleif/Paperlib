@@ -58,6 +58,18 @@ def test_project_flow(lib, tmp_path):
     assert paper["id"] not in lib.manual_project_paper_ids(proj["id"])
 
 
+def test_add_same_external_file_twice_dedups(lib, tmp_path):
+    # A file dragged/browsed from OUTSIDE papers/ added twice must dedup on
+    # content, yielding exactly one row and one copy on disk.
+    src = _make_txt(tmp_path, "dup.txt", "duplicate content dedup test " * 10)
+    first = lib.add_file(str(src))
+    second = lib.add_file(str(src))
+    assert first["id"] == second["id"]
+    assert len(lib.all_papers()) == 1
+    copies = list(config.PAPERS_DIR.iterdir())
+    assert len(copies) == 1
+
+
 def test_delete_paper(lib, tmp_path):
     paper = lib.add_file(str(_make_txt(tmp_path, "d.txt", "delete me test " * 10)))
     lib.delete_paper(paper["id"])

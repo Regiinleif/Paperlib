@@ -274,7 +274,8 @@ class SettingsDialog(tk.Toplevel):
             row=0, column=1, pady=4)
 
         env_note = ("Leave blank to use the ANTHROPIC_API_KEY environment "
-                    "variable instead (recommended).")
+                    "variable, or a .env file in the project root, instead "
+                    "(recommended).")
         ttk.Label(frm, text=env_note, foreground="#6b7280",
                   wraplength=380).grid(row=1, column=1, sticky="w")
 

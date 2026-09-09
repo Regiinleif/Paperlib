@@ -45,6 +45,11 @@ def chunk_text(text: str, size: int = 900, overlap: int = 150) -> list[str]:
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return []
+    # Guarantee forward progress: the step (size - overlap) must be positive,
+    # otherwise `start` never advances and we loop forever. Clamp overlap to
+    # [0, size - 1]. Normal defaults (size=900, overlap=150) are unaffected.
+    size = max(size, 1)
+    overlap = min(max(overlap, 0), size - 1)
     chunks: list[str] = []
     start = 0
     while start < len(text):
@@ -150,6 +155,10 @@ def rank_by_topic(topic: str, papers: list[dict], top_n: int | None = None) -> l
 # Generation: send retrieved context + question to Claude.
 # --------------------------------------------------------------------------
 
+# Generous cap so long answers (e.g. multi-source syntheses) are not cut off
+# mid-thought. Streaming is used below, so large values don't risk HTTP timeouts.
+MAX_TOKENS = 16000
+
 SYSTEM_PROMPT = (
     "You are a research assistant embedded in the user's personal paper "
     "library. Answer using ONLY the excerpts provided in the CONTEXT section. "
@@ -206,13 +215,20 @@ class RagChat:
         answer_parts: list[str] = []
         with self.client.messages.stream(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=self.history,
         ) as stream:
             for text in stream.text_stream:
                 answer_parts.append(text)
                 yield text
+            final = stream.get_final_message()
+
+        # If we still hit the cap, tell the user rather than silently truncating.
+        if getattr(final, "stop_reason", None) == "max_tokens":
+            note = "\n\n[Answer truncated - hit max length.]"
+            answer_parts.append(note)
+            yield note
 
         full_answer = "".join(answer_parts)
         self.history.append({"role": "assistant", "content": full_answer})

@@ -38,7 +38,15 @@ needs an Anthropic API key. Either:
   setx ANTHROPIC_API_KEY "sk-ant-..."
   ```
   (open a new terminal afterwards), **or**
+- create a `.env` file in the project root (`D:\paperlib\.env`) with:
+  ```
+  ANTHROPIC_API_KEY=sk-ant-...
+  ```
+  (this file is gitignored, so your key is never committed), **or**
 - enter it via **Settings** in the app (stored in `data/config.json`).
+
+If more than one is set, a real environment variable wins, then `.env`, then
+the key saved in `data/config.json`.
 
 ## Running
 

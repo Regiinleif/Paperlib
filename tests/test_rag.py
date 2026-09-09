@@ -1,5 +1,7 @@
 """Tests for the RAG retrieval pipeline (chunk -> retrieve -> rank)."""
 
+import threading
+
 from paperlib import rag
 
 
@@ -13,6 +15,31 @@ def test_chunk_text_overlaps():
 
 def test_chunk_empty_text():
     assert rag.chunk_text("   ") == []
+
+
+def test_chunk_text_overlap_ge_size_terminates():
+    # With overlap >= size the old code looped forever. Run in a thread with a
+    # timeout so a regression fails the test instead of hanging the suite.
+    result = {}
+
+    def run():
+        result["chunks"] = rag.chunk_text("x" * 500, size=100, overlap=150)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=5)
+    assert not t.is_alive(), "chunk_text hung with overlap >= size"
+    chunks = result["chunks"]
+    assert chunks, "expected non-empty chunks"
+    assert all(c for c in chunks)
+    assert all(len(c) <= 100 for c in chunks)
+    # The chunks should still cover the whole text.
+    assert "".join(chunks).count("x") >= 500
+
+
+def test_max_tokens_is_generous():
+    # L2: the answer cap was bumped well above the old 4096 to avoid truncation.
+    assert rag.MAX_TOKENS >= 16000
 
 
 def test_retriever_finds_relevant_chunk():

@@ -12,6 +12,7 @@ for a personal library that is simplest and keeps retrieval fast.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS papers (
     keywords   TEXT NOT NULL DEFAULT '[]',
     category   TEXT NOT NULL DEFAULT 'Uncategorized',
     text       TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
     added_at   TEXT NOT NULL
 );
 
@@ -53,7 +55,16 @@ class Library:
         self.conn = sqlite3.connect(config.DB_PATH)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring older DBs up to the current schema (backward-compatible)."""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(papers)")}
+        if "content_hash" not in cols:
+            self.conn.execute(
+                "ALTER TABLE papers ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+            )
 
     # ---- papers -------------------------------------------------------
 
@@ -68,18 +79,21 @@ class Library:
         if source_path.suffix.lower() not in (".pdf", ".txt"):
             raise ValueError(f"Unsupported file type: {source_path.suffix}")
 
+        # Dedup on file CONTENT, not on the post-copy path: the same file added
+        # twice must not create a second row or a second copy on disk. We hash
+        # the source bytes before copying so a duplicate is caught up front.
+        content_hash = self._hash_file(source_path)
+        existing = self.conn.execute(
+            "SELECT id FROM papers WHERE content_hash = ?", (content_hash,)
+        ).fetchone()
+        if existing:
+            return self.get_paper(existing["id"])
+
         dest = config.PAPERS_DIR / source_path.name
         # Avoid clobbering a different file with the same name.
         if source_path.resolve() != dest.resolve():
             dest = self._unique_dest(source_path.name)
             shutil.copy2(source_path, dest)
-
-        # Skip if this exact path is already in the library.
-        existing = self.conn.execute(
-            "SELECT * FROM papers WHERE path = ?", (str(dest),)
-        ).fetchone()
-        if existing:
-            return dict(existing)
 
         text = extract.extract_text(dest)
         keywords = extract.extract_keywords(text)
@@ -87,8 +101,8 @@ class Library:
         title = extract.guess_title(text, fallback=dest.stem)
 
         cur = self.conn.execute(
-            "INSERT INTO papers (filename, path, title, keywords, category, text, added_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, added_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 dest.name,
                 str(dest),
@@ -96,11 +110,21 @@ class Library:
                 json.dumps(keywords),
                 category,
                 text,
+                content_hash,
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
         self.conn.commit()
         return self.get_paper(cur.lastrowid)
+
+    @staticmethod
+    def _hash_file(path: Path) -> str:
+        """Return a sha256 hex digest of a file's raw bytes."""
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(65536), b""):
+                h.update(block)
+        return h.hexdigest()
 
     def _unique_dest(self, name: str) -> Path:
         dest = config.PAPERS_DIR / name
