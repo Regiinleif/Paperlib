@@ -31,13 +31,3 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
-
-# Claude Code local config / agents — not part of the project
-.claude/
-
-# CI/CD documentation and workflows — kept local, not tracked
-docs/CICD.md
-.github/workflows/
-
-# Personal résumé — never commit
-cv.tex
