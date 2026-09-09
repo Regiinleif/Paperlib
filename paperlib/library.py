@@ -74,6 +74,17 @@ class Library:
                 self.conn.execute(
                     "ALTER TABLE papers ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
                 )
+            if "processed" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE papers ADD COLUMN processed INTEGER NOT NULL DEFAULT 0"
+                )
+                # New column defaults every existing row to 0 (pending), but rows
+                # already carrying extracted text were digested under the old
+                # model - mark them processed so an existing library isn't shown
+                # as all-pending. Empty-text rows stay 0.
+                self.conn.execute(
+                    "UPDATE papers SET processed = 1 WHERE text != ''"
+                )
 
     # ---- papers -------------------------------------------------------
 
@@ -112,8 +123,8 @@ class Library:
 
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, added_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, processed, added_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
                 (
                     dest.name,
                     str(dest),
@@ -127,6 +138,87 @@ class Library:
             )
             self.conn.commit()
             return self.get_paper(cur.lastrowid)
+
+    def register_file(self, source_path: str | Path) -> dict:
+        """Fast import: copy a file into papers/ WITHOUT extracting anything.
+
+        This is the drop-time path. It copies the file in and records a
+        placeholder row (empty text, no keywords, category "Pending") so the
+        paper shows up in the library instantly. The slow parsing/keywording is
+        deferred to ``digest_paper``. Returns the new paper as a dict, or the
+        existing one if it is a content-duplicate. Raises ValueError for
+        unsupported files.
+        """
+        source_path = Path(source_path)
+        if source_path.suffix.lower() not in (".pdf", ".txt"):
+            raise ValueError(f"Unsupported file type: {source_path.suffix}")
+
+        # Dedup on file CONTENT exactly like add_file - no copy or insert for a
+        # file we already have.
+        content_hash = self._hash_file(source_path)
+        with self._lock:
+            existing = self.conn.execute(
+                "SELECT id FROM papers WHERE content_hash = ?", (content_hash,)
+            ).fetchone()
+            if existing:
+                return self.get_paper(existing["id"])
+
+        dest = config.PAPERS_DIR / source_path.name
+        if source_path.resolve() != dest.resolve():
+            dest = self._unique_dest(source_path.name)
+            shutil.copy2(source_path, dest)
+
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, processed, added_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                (
+                    dest.name,
+                    str(dest),
+                    dest.stem,
+                    "[]",
+                    "Pending",
+                    "",
+                    content_hash,
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+            self.conn.commit()
+            return self.get_paper(cur.lastrowid)
+
+    def pending_papers(self) -> list[dict]:
+        """Registered-but-not-yet-digested papers, oldest first."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE processed = 0 ORDER BY added_at"
+            ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    def digest_paper(self, paper_id: int) -> dict:
+        """Run the slow extraction for one registered paper and store it.
+
+        Reads the paper's file, extracts text, keywords, category and title,
+        updates the row and flips ``processed`` to 1. Returns the updated paper
+        dict (or None if the id is unknown).
+        """
+        paper = self.get_paper(paper_id)
+        if paper is None:
+            return None
+        path = paper["path"]
+        text = extract.extract_text(path)
+        keywords = extract.extract_keywords(text)
+        category = extract.categorize(keywords)
+        fallback = paper.get("title") or Path(path).stem
+        title = extract.guess_title(text, fallback=fallback)
+
+        with self._lock:
+            self.conn.execute(
+                "UPDATE papers SET text = ?, keywords = ?, category = ?, title = ?,"
+                " processed = 1 WHERE id = ?",
+                (text, json.dumps(keywords), category, title, paper_id),
+            )
+            self.conn.commit()
+            return self.get_paper(paper_id)
 
     @staticmethod
     def _hash_file(path: Path) -> str:
@@ -150,10 +242,12 @@ class Library:
             i += 1
 
     def sync_folder(self) -> list[dict]:
-        """Import any .pdf/.txt in papers/ that isn't in the DB yet.
+        """Register any .pdf/.txt in papers/ that isn't in the DB yet.
 
         Lets the user drop files into the folder in Explorer and have them
-        picked up next time the app scans. Returns the newly added papers.
+        picked up next time the app scans. Consistent with the drop flow, files
+        are REGISTERED as pending (fast, no extraction) - digest them later.
+        Returns the newly registered papers.
         """
         with self._lock:
             known = {row["path"] for row in self.conn.execute("SELECT path FROM papers")}
@@ -161,7 +255,7 @@ class Library:
         for path in sorted(config.PAPERS_DIR.iterdir()):
             if path.suffix.lower() in (".pdf", ".txt") and str(path) not in known:
                 try:
-                    added.append(self.add_file(path))
+                    added.append(self.register_file(path))
                 except ValueError:
                     continue
         return added

@@ -8,12 +8,15 @@
 ; so the installer does not create or touch any data directory.
 
 #define MyAppName "PaperLib"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "PaperLib"
 #define MyAppExeName "PaperLib.exe"
 
 [Setup]
-AppId={{7B4C2E1A-9D3F-4A6B-8C21-PAPERLIB0001}}
+; Fixed AppId GUID: keeps upgrades/uninstalls tied to the same product so a
+; reinstall replaces the previous install cleanly. The leading '{{' is Inno's
+; escape for a literal '{'.
+AppId={{63FF2543-E11E-41E1-BA9A-59DEBA5AFD6C}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -47,3 +50,20 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+{ On uninstall, always wipe the per-user data folder
+  (%LOCALAPPDATA%\PaperLib), which holds the copied papers and the library.db.
+  The app only ever stores COPIES of PDFs there, so removing it is safe and
+  guarantees a truly clean uninstall that leaves nothing behind. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    DataDir := ExpandConstant('{localappdata}\PaperLib');
+    if DirExists(DataDir) then
+      DelTree(DataDir, True, True, True);
+  end;
+end;

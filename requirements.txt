@@ -1,4 +1,6 @@
 # PaperLib dependencies
 anthropic>=0.40      # Official Claude API SDK (the RAG chat)
-pypdf>=4.0           # Extract text from PDF papers
+pypdf>=4.0           # Extract text from PDF papers (keywords, RAG, reader fallback)
+pypdfium2>=4.0       # Render PDF pages to images for the in-app paper reader
+pillow>=10.0         # Image handling for the rendered pages / figures
 tkinterdnd2>=0.4     # Drag-and-drop files onto the drop box (optional but nice)

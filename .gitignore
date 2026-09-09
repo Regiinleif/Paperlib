@@ -13,6 +13,10 @@ build/
 dist/
 release/
 
+# Seed payload bundled into fresh installs — contains COPIES of the user's
+# real papers/PDFs and their library.db, so it must NEVER be committed.
+seed/
+
 # Personal data — NEVER commit your papers or your API key
 /papers/*
 !/papers/.gitkeep
@@ -27,3 +31,12 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code local config / agents — not part of the project
+.claude/
+
+# CI/CD documentation — kept local, not tracked
+docs/CICD.md
+
+# Personal résumé — never commit
+cv.tex

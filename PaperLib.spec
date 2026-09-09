@@ -11,6 +11,8 @@ Notes:
   binaries shipped by tkinterdnd2, and it starts faster.
 - collect_all('tkinterdnd2') pulls in the platform tkdnd .dll / tcl files that
   drag-and-drop needs at runtime.
+- collect_all('pypdfium2') bundles the native pdfium binary used to render PDF
+  pages to images in the reader.
 - collect_all('anthropic') is included to catch any package data files.
 """
 
@@ -20,12 +22,17 @@ datas = []
 binaries = []
 hiddenimports = []
 
-# tkinterdnd2 ships native tkdnd binaries + tcl data that must be bundled.
-for pkg in ("tkinterdnd2", "anthropic"):
+# These ship native binaries / data files that must be bundled:
+#   tkinterdnd2 -> tkdnd .dll + tcl (drag-and-drop)
+#   pypdfium2   -> pdfium native library (PDF page rendering)
+for pkg in ("tkinterdnd2", "pypdfium2", "anthropic"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
     hiddenimports += h
+
+# Pillow's Tk image bridge is imported lazily, so name it explicitly.
+hiddenimports += ["PIL.ImageTk"]
 
 # Make sure every paperlib submodule is included.
 hiddenimports += collect_submodules("paperlib")
