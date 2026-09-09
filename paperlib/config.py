@@ -3,9 +3,9 @@
 Everything the app needs to find on disk lives here so the rest of the code
 never hard-codes a path. The layout under the project root is:
 
-    D:\\paperlib\\
-        papers\\        <- drop your downloaded PDFs here (the "drop box")
-        data\\          <- library.db (metadata) and config.json (settings)
+    <project-root>/
+        papers/        <- drop your downloaded PDFs here (the "drop box")
+        data/          <- library.db (metadata) and config.json (settings)
 """
 
 from __future__ import annotations

@@ -1,11 +1,21 @@
 # PaperLib
 
-A personal research-paper library with a Claude-powered **RAG** chat — your
-private, offline-first reference manager with an AI research assistant built in.
+A private, offline-first research-paper library with a Claude-powered **RAG**
+chat built in — drop in your PDFs, and ask questions that are answered with
+cited passages from your own papers.
 
-This is a **first draft** meant partly as a way to learn Retrieval-Augmented
-Generation. The retrieval engine is written in plain Python (TF-IDF) so you can
-read every step; the generation step calls Claude through the official SDK.
+**Stack:** Python 3 · Tkinter (desktop GUI) · SQLite · Anthropic Claude SDK ·
+a from-scratch TF-IDF retrieval engine · pytest · PyInstaller (Windows build).
+
+The retrieval engine is written in plain Python (TF-IDF) rather than pulled
+from a library, so every step of the RAG pipeline — chunking, scoring,
+augmentation, generation — is inspectable; the generation step calls Claude
+through the official SDK.
+
+<!-- Add a screenshot or GIF of the app here — it's the fastest way for a
+     reader to grasp what PaperLib does. Drop an image in docs/ and reference it:
+     ![PaperLib](docs/screenshot.png) -->
+<!-- ![PaperLib](docs/screenshot.png) -->
 
 ## What it does
 
@@ -23,10 +33,14 @@ read every step; the generation step calls Claude through the official SDK.
 
 ## Setup
 
-```powershell
-cd D:\paperlib
-py -m pip install -r requirements.txt
+```bash
+git clone https://github.com/Regiinleif/Paperlib.git
+cd Paperlib
+python -m pip install -r requirements.txt
 ```
+
+> The GUI and packaged installer target Windows, but the app runs from source
+> anywhere Python and Tkinter are available.
 
 ### Anthropic API key (needed for the chat)
 
@@ -38,7 +52,7 @@ needs an Anthropic API key. Either:
   setx ANTHROPIC_API_KEY "sk-ant-..."
   ```
   (open a new terminal afterwards), **or**
-- create a `.env` file in the project root (`D:\paperlib\.env`) with:
+- create a `.env` file in the project root with:
   ```
   ANTHROPIC_API_KEY=sk-ant-...
   ```
@@ -50,10 +64,12 @@ the key saved in `data/config.json`.
 
 ## Running
 
-- Double-click the **PaperLib** shortcut on your Desktop, or
-- ```powershell
-  py D:\paperlib\run.py
-  ```
+```bash
+python run.py
+```
+
+(Or, from a packaged Windows install, launch **PaperLib** from the Start menu /
+Desktop shortcut.)
 
 ## How the RAG works (the learning part)
 
@@ -73,15 +89,16 @@ embedding-backed store; the rest of the app only calls `add_document()` and
 ## Project layout
 
 ```
-D:\paperlib\
-  papers\            # your PDFs live here (the drop box copies into it)
-  data\              # library.db (metadata) + config.json (settings)
-  paperlib\
+paperlib/            (project root)
+  papers/            # your PDFs live here (the drop box copies into it)
+  data/              # library.db (metadata) + config.json (settings)
+  paperlib/
     app.py           # main window + drop box + library/projects
     project_window.py# research session window + chat
     library.py       # SQLite store
     extract.py       # PDF text + keyword extraction/categorization
     rag.py           # chunk -> retrieve -> augment -> generate
+    reader.py        # in-app PDF page reader
     config.py        # paths + settings
   run.py             # entry point
 ```
