@@ -14,6 +14,7 @@ still runs and you use the "Add files..." button instead.
 
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -31,10 +32,26 @@ except Exception:  # pragma: no cover - environment dependent
     _HAS_DND = False
 
 
+def _import_summary(added: int, skipped: int, empty: int) -> str:
+    """Build the final status-bar message after an import run.
+
+    Factored out (and pure) so the counting/wording is unit-testable without a
+    GUI. ``empty`` is how many *added* papers had no readable extracted text -
+    typically scanned/image-only PDFs added silently as "Uncategorized".
+    """
+    msg = f"Added {added} paper(s)."
+    if empty:
+        msg += f" ({empty} had no readable text - likely scanned PDFs)"
+    if skipped:
+        msg += f" Skipped {skipped} unsupported file(s)."
+    return msg
+
+
 class PaperLibApp:
     def __init__(self) -> None:
         config.ensure_dirs()
         self.lib = Library()
+        self._importing = False
 
         self.root = _DND_ROOT()
         self.root.title("PaperLib - Research Paper Library")
@@ -85,7 +102,8 @@ class PaperLibApp:
         self.tree.pack(fill="both", expand=True, pady=4)
         lbtns = ttk.Frame(left)
         lbtns.pack(fill="x")
-        ttk.Button(lbtns, text="Add files...", command=self._browse_files).pack(side="left")
+        self.add_btn = ttk.Button(lbtns, text="Add files...", command=self._browse_files)
+        self.add_btn.pack(side="left")
         ttk.Button(lbtns, text="Delete selected",
                    command=self._delete_selected_paper).pack(side="left", padx=4)
 
@@ -151,18 +169,52 @@ class PaperLibApp:
             self._import_paths(list(paths))
 
     def _import_paths(self, paths: list[str]) -> None:
-        added, skipped = 0, 0
-        for path in paths:
+        """Kick off an import on a background thread so the UI stays responsive.
+
+        add_file does slow work (copy + PDF parsing + keywording); running it on
+        the main thread froze the window. We do it on a worker and marshal every
+        UI update back with self.after(0, ...). A busy flag stops overlapping
+        imports (e.g. a second drop while one is still running).
+        """
+        if self._importing or not paths:
+            return
+        self._importing = True
+        self._set_import_enabled(False)
+        thread = threading.Thread(
+            target=self._run_import, args=(list(paths),), daemon=True
+        )
+        thread.start()
+
+    def _run_import(self, paths: list[str]) -> None:
+        """Runs on a worker thread; marshals UI updates back to the main loop."""
+        total = len(paths)
+        added, skipped, empty = 0, 0, 0
+        for i, path in enumerate(paths, start=1):
+            self.after(0, self._set_status, f"Adding {i} of {total}...")
             try:
-                self.lib.add_file(path)
+                paper = self.lib.add_file(path)
                 added += 1
+                if not (paper.get("text") or "").strip():
+                    empty += 1
             except ValueError:
                 skipped += 1
-        self._refresh_library()
-        msg = f"Added {added} paper(s)."
-        if skipped:
-            msg += f" Skipped {skipped} unsupported file(s)."
-        self._set_status(msg)
+        self.after(0, self._finish_import, _import_summary(added, skipped, empty))
+
+    def _finish_import(self, msg: str) -> None:
+        """Back on the main thread: re-enable input, refresh, show the summary."""
+        self._importing = False
+        self._set_import_enabled(True)
+        self._refresh_library()  # sets a "N paper(s) in library." status...
+        self._set_status(msg)    # ...so the import summary must come after it.
+
+    def _set_import_enabled(self, enabled: bool) -> None:
+        """Toggle the drop box / browse button so imports can't overlap."""
+        self.add_btn.configure(state="normal" if enabled else "disabled")
+        if enabled:
+            self.drop.configure(text=self._drop_text(), bg="#eef2ff", cursor="hand2")
+        else:
+            self.drop.configure(text="Importing... please wait", bg="#e5e7eb",
+                                cursor="watch")
 
     def _rescan(self) -> None:
         new = self.lib.sync_folder()

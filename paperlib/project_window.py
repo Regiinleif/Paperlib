@@ -43,8 +43,13 @@ class ProjectWindow(tk.Toplevel):
         self.topic_var = tk.StringVar(value=self.project.get("topic", ""))
         topic_entry = ttk.Entry(topbar, textvariable=self.topic_var, width=60)
         topic_entry.pack(side="left", padx=6)
-        ttk.Button(topbar, text="Find relevant papers",
-                   command=self._load_relevant_papers).pack(side="left")
+        self.find_btn = ttk.Button(topbar, text="Find relevant papers",
+                                   command=self._load_relevant_papers)
+        self.find_btn.pack(side="left")
+        # Shows "Finding relevant papers with Claude..." while ranking runs.
+        self.status_var = tk.StringVar(value="")
+        ttk.Label(topbar, textvariable=self.status_var,
+                  foreground="#6b7280").pack(side="left", padx=8)
 
         # Split: left = papers in this session, right = chat.
         panes = ttk.PanedWindow(self, orient="horizontal")
@@ -98,7 +103,13 @@ class ProjectWindow(tk.Toplevel):
 
     def _load_relevant_papers(self) -> None:
         """Populate the session with papers matching the topic, keeping any
-        manually added ones."""
+        manually added ones.
+
+        When an API key is available the ranking is semantic (Claude judges
+        relevance by meaning) and runs on a background thread so the window
+        stays responsive; without a key it falls back to the instant lexical
+        TF-IDF ranking on the UI thread.
+        """
         topic = self.topic_var.get().strip()
         manual_ids = self.lib.manual_project_paper_ids(self.project["id"])
 
@@ -109,14 +120,44 @@ class ProjectWindow(tk.Toplevel):
             if self.lib.get_paper(pid)
         }
 
-        if topic:
-            all_papers = self.lib.all_papers()
-            ranked = rag.rank_by_topic(topic, all_papers, top_n=12)
-            for paper in ranked:
-                self.included.setdefault(paper["id"], paper)
+        if not topic:
+            self._apply_ranked([])
+            return
 
+        all_papers = self.lib.all_papers()
+        api_key = config.get_api_key()
+
+        if not api_key:
+            # No key -> lexical ranking is instant; no worker thread needed.
+            self._apply_ranked(rag.rank_by_topic(topic, all_papers, top_n=12))
+            return
+
+        # Have a key -> semantic ranking hits the API, so run it off the UI
+        # thread (mirrors the chat threading below) to avoid freezing.
+        self.find_btn.configure(state="disabled")
+        self.status_var.set("Finding relevant papers with Claude...")
+        thread = threading.Thread(
+            target=self._run_ranking, args=(topic, all_papers, api_key),
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_ranking(self, topic: str, all_papers: list[dict], api_key: str) -> None:
+        """Runs on a worker thread; marshals the result back to the main loop."""
+        try:
+            ranked = rag.rank_by_topic_llm(topic, all_papers, api_key, top_n=12)
+        except Exception:  # never let a worker-thread error strand the button
+            ranked = rag.rank_by_topic(topic, all_papers, top_n=12)
+        self.after(0, self._apply_ranked, ranked)
+
+    def _apply_ranked(self, ranked: list[dict]) -> None:
+        """Merge ranked papers into the session and refresh the UI (main thread)."""
+        for paper in ranked:
+            self.included.setdefault(paper["id"], paper)
         self._refresh_papers_list()
         self._rebuild_index()
+        self.status_var.set("")
+        self.find_btn.configure(state="normal")
 
     def _refresh_papers_list(self) -> None:
         self.papers_list.delete(0, "end")
@@ -124,6 +165,10 @@ class ProjectWindow(tk.Toplevel):
         for paper in self._list_order:
             score = paper.get("score")
             tag = f"  (match {score:.2f})" if score else ""
+            # Show the model's one-line reason when we have one (truncated).
+            reason = paper.get("reason")
+            if reason:
+                tag += f" - {reason[:60]}"
             self.papers_list.insert("end", f"{paper['title']}{tag}")
 
     def _rebuild_index(self) -> None:

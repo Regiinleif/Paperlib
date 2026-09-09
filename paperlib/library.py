@@ -16,6 +16,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -52,19 +53,27 @@ CREATE TABLE IF NOT EXISTS project_papers (
 class Library:
     def __init__(self) -> None:
         config.ensure_dirs()
-        self.conn = sqlite3.connect(config.DB_PATH)
+        # check_same_thread=False lets the background import worker (app.py) call
+        # add_file off the UI thread without sqlite's cross-thread guard tripping.
+        # This app has very low concurrency, so we serialize EVERY DB access
+        # through self._lock (reentrant, since some methods call others) to keep
+        # that safe.
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        self._migrate()
-        self.conn.commit()
+        with self._lock:
+            self.conn.executescript(SCHEMA)
+            self._migrate()
+            self.conn.commit()
 
     def _migrate(self) -> None:
         """Bring older DBs up to the current schema (backward-compatible)."""
-        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(papers)")}
-        if "content_hash" not in cols:
-            self.conn.execute(
-                "ALTER TABLE papers ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
-            )
+        with self._lock:
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(papers)")}
+            if "content_hash" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE papers ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+                )
 
     # ---- papers -------------------------------------------------------
 
@@ -83,11 +92,12 @@ class Library:
         # twice must not create a second row or a second copy on disk. We hash
         # the source bytes before copying so a duplicate is caught up front.
         content_hash = self._hash_file(source_path)
-        existing = self.conn.execute(
-            "SELECT id FROM papers WHERE content_hash = ?", (content_hash,)
-        ).fetchone()
-        if existing:
-            return self.get_paper(existing["id"])
+        with self._lock:
+            existing = self.conn.execute(
+                "SELECT id FROM papers WHERE content_hash = ?", (content_hash,)
+            ).fetchone()
+            if existing:
+                return self.get_paper(existing["id"])
 
         dest = config.PAPERS_DIR / source_path.name
         # Avoid clobbering a different file with the same name.
@@ -100,22 +110,23 @@ class Library:
         category = extract.categorize(keywords)
         title = extract.guess_title(text, fallback=dest.stem)
 
-        cur = self.conn.execute(
-            "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, added_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                dest.name,
-                str(dest),
-                title,
-                json.dumps(keywords),
-                category,
-                text,
-                content_hash,
-                datetime.now().isoformat(timespec="seconds"),
-            ),
-        )
-        self.conn.commit()
-        return self.get_paper(cur.lastrowid)
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO papers (filename, path, title, keywords, category, text, content_hash, added_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    dest.name,
+                    str(dest),
+                    title,
+                    json.dumps(keywords),
+                    category,
+                    text,
+                    content_hash,
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+            self.conn.commit()
+            return self.get_paper(cur.lastrowid)
 
     @staticmethod
     def _hash_file(path: Path) -> str:
@@ -144,7 +155,8 @@ class Library:
         Lets the user drop files into the folder in Explorer and have them
         picked up next time the app scans. Returns the newly added papers.
         """
-        known = {row["path"] for row in self.conn.execute("SELECT path FROM papers")}
+        with self._lock:
+            known = {row["path"] for row in self.conn.execute("SELECT path FROM papers")}
         added: list[dict] = []
         for path in sorted(config.PAPERS_DIR.iterdir()):
             if path.suffix.lower() in (".pdf", ".txt") and str(path) not in known:
@@ -155,15 +167,17 @@ class Library:
         return added
 
     def get_paper(self, paper_id: int) -> dict:
-        row = self.conn.execute(
-            "SELECT * FROM papers WHERE id = ?", (paper_id,)
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM papers WHERE id = ?", (paper_id,)
+            ).fetchone()
         return self._row_to_paper(row) if row else None
 
     def all_papers(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM papers ORDER BY category, title"
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM papers ORDER BY category, title"
+            ).fetchall()
         return [self._row_to_paper(r) for r in rows]
 
     def papers_by_category(self) -> dict[str, list[dict]]:
@@ -179,9 +193,10 @@ class Library:
                 Path(paper["path"]).unlink(missing_ok=True)
             except OSError:
                 pass
-        self.conn.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
-        self.conn.execute("DELETE FROM project_papers WHERE paper_id = ?", (paper_id,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+            self.conn.execute("DELETE FROM project_papers WHERE paper_id = ?", (paper_id,))
+            self.conn.commit()
 
     @staticmethod
     def _row_to_paper(row: sqlite3.Row) -> dict:
@@ -192,48 +207,55 @@ class Library:
     # ---- projects -----------------------------------------------------
 
     def create_project(self, name: str, topic: str) -> dict:
-        cur = self.conn.execute(
-            "INSERT INTO projects (name, topic, created_at) VALUES (?, ?, ?)",
-            (name, topic, datetime.now().isoformat(timespec="seconds")),
-        )
-        self.conn.commit()
-        row = self.conn.execute(
-            "SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)
-        ).fetchone()
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO projects (name, topic, created_at) VALUES (?, ?, ?)",
+                (name, topic, datetime.now().isoformat(timespec="seconds")),
+            )
+            self.conn.commit()
+            row = self.conn.execute(
+                "SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
         return dict(row)
 
     def all_projects(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM projects ORDER BY created_at DESC"
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM projects ORDER BY created_at DESC"
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def delete_project(self, project_id: int) -> None:
-        self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-        self.conn.execute(
-            "DELETE FROM project_papers WHERE project_id = ?", (project_id,)
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            self.conn.execute(
+                "DELETE FROM project_papers WHERE project_id = ?", (project_id,)
+            )
+            self.conn.commit()
 
     def add_paper_to_project(self, project_id: int, paper_id: int) -> None:
-        self.conn.execute(
-            "INSERT OR IGNORE INTO project_papers (project_id, paper_id) VALUES (?, ?)",
-            (project_id, paper_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO project_papers (project_id, paper_id) VALUES (?, ?)",
+                (project_id, paper_id),
+            )
+            self.conn.commit()
 
     def remove_paper_from_project(self, project_id: int, paper_id: int) -> None:
-        self.conn.execute(
-            "DELETE FROM project_papers WHERE project_id = ? AND paper_id = ?",
-            (project_id, paper_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                (project_id, paper_id),
+            )
+            self.conn.commit()
 
     def manual_project_paper_ids(self, project_id: int) -> set[int]:
-        rows = self.conn.execute(
-            "SELECT paper_id FROM project_papers WHERE project_id = ?", (project_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT paper_id FROM project_papers WHERE project_id = ?", (project_id,)
+            ).fetchall()
         return {r["paper_id"] for r in rows}
 
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()

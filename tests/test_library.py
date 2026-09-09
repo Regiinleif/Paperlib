@@ -1,5 +1,7 @@
 """Tests for the SQLite library store, isolated to a temp directory."""
 
+import threading
+
 import pytest
 
 from paperlib import config, library
@@ -74,3 +76,25 @@ def test_delete_paper(lib, tmp_path):
     paper = lib.add_file(str(_make_txt(tmp_path, "d.txt", "delete me test " * 10)))
     lib.delete_paper(paper["id"])
     assert lib.all_papers() == []
+
+
+def test_add_file_from_background_thread(lib, tmp_path):
+    # The app imports on a worker thread (so the UI stays responsive). The DB
+    # connection is opened with check_same_thread=False and guarded by a lock,
+    # so calling add_file off the main thread must not raise ProgrammingError.
+    src = _make_txt(tmp_path, "bg.txt", "background thread import test " * 10)
+    result = {}
+
+    def worker():
+        try:
+            result["paper"] = lib.add_file(str(src))
+        except Exception as exc:  # pragma: no cover - failure path
+            result["error"] = exc
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert "error" not in result
+    assert result["paper"]["id"] is not None
+    assert len(lib.all_papers()) == 1

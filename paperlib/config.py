@@ -12,13 +12,31 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
-# Project root = the folder that contains the `paperlib` package.
-ROOT = Path(__file__).resolve().parent.parent
+# Are we running from a PyInstaller-frozen build (installed .exe) or from
+# source?  When frozen, ``__file__`` points into a temporary extraction dir
+# that is wiped on exit, so user data must live somewhere writable and
+# persistent instead.
+FROZEN = getattr(sys, "frozen", False)
 
-PAPERS_DIR = ROOT / "papers"
-DATA_DIR = ROOT / "data"
+if FROZEN:
+    # ROOT is the folder that actually contains the running executable, e.g.
+    # ``C:\Program Files\PaperLib``.  We treat this as read-only (it may live
+    # under Program Files) and only use it to look for a user-supplied .env.
+    ROOT = Path(sys.executable).resolve().parent
+    # User data (papers, database, settings) goes in a per-user writable
+    # location so an installed, non-admin user can still use the app.
+    _DATA_ROOT = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "PaperLib"
+else:
+    # Running from source: root = the folder that contains the `paperlib`
+    # package.  Behaviour is unchanged from the original project layout.
+    ROOT = Path(__file__).resolve().parent.parent
+    _DATA_ROOT = ROOT
+
+PAPERS_DIR = _DATA_ROOT / "papers"
+DATA_DIR = _DATA_ROOT / "data"
 DB_PATH = DATA_DIR / "library.db"
 CONFIG_PATH = DATA_DIR / "config.json"
 
@@ -41,21 +59,21 @@ def load_config() -> dict:
         return {}
 
 
-def load_dotenv_file() -> dict:
-    """Read the project's ``.env`` file into a dict, dependency-free.
+def _dotenv_search_dirs() -> list[Path]:
+    """Directories to look in for a ``.env`` file, most-preferred first.
 
-    We deliberately avoid python-dotenv to keep the project dependency-light.
-    Parses simple ``KEY=VALUE`` lines from ``ROOT / ".env"``:
-
-    - blank lines and lines starting with ``#`` are ignored,
-    - a leading ``export `` is tolerated (``export KEY=VALUE``),
-    - surrounding whitespace is stripped from both key and value,
-    - a single pair of matching surrounding quotes is stripped from the value.
-
-    Never raises: if the file is missing or a line is malformed it is simply
-    skipped, and ``{}`` is returned for a missing/unreadable file.
+    - From source: just the project root (unchanged behaviour; the tests
+      monkeypatch ``config.ROOT`` and rely on this).
+    - Frozen/installed: next to the executable first (so a user can drop a
+      ``.env`` beside ``PaperLib.exe``), then the per-user data dir.
     """
-    env_path = ROOT / ".env"
+    if FROZEN:
+        return [ROOT, DATA_DIR]
+    return [ROOT]
+
+
+def _parse_dotenv(env_path: Path) -> dict:
+    """Parse a single ``.env`` file into a dict; never raises."""
     values: dict[str, str] = {}
     try:
         with open(env_path, "r", encoding="utf-8") as f:
@@ -83,6 +101,29 @@ def load_dotenv_file() -> dict:
         # Missing or unreadable .env -> behave as if it did not exist.
         return {}
     return values
+
+
+def load_dotenv_file() -> dict:
+    """Read a ``.env`` file into a dict, dependency-free.
+
+    We deliberately avoid python-dotenv to keep the project dependency-light.
+    Parses simple ``KEY=VALUE`` lines:
+
+    - blank lines and lines starting with ``#`` are ignored,
+    - a leading ``export `` is tolerated (``export KEY=VALUE``),
+    - surrounding whitespace is stripped from both key and value,
+    - a single pair of matching surrounding quotes is stripped from the value.
+
+    From source this reads ``ROOT / ".env"``.  When frozen it also looks in the
+    per-user data dir, with the file next to the executable winning on conflict.
+
+    Never raises: missing or malformed files/lines are simply skipped.
+    """
+    merged: dict[str, str] = {}
+    # Later dirs must not override earlier (more-preferred) ones.
+    for base in reversed(_dotenv_search_dirs()):
+        merged.update(_parse_dotenv(base / ".env"))
+    return merged
 
 
 def save_config(config: dict) -> None:

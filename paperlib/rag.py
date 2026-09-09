@@ -152,6 +152,186 @@ def rank_by_topic(topic: str, papers: list[dict], top_n: int | None = None) -> l
 
 
 # --------------------------------------------------------------------------
+# Semantic ranking: let Claude judge relevance by MEANING, not shared words.
+# --------------------------------------------------------------------------
+
+# The fast, cheap triage model used only to score topic relevance. The main
+# RAG chat still uses the (bigger) model from ``config.get_model()``; this one
+# is deliberately a Haiku-class model because ranking is a high-volume,
+# low-stakes classification job where speed and price matter more than depth.
+RANK_MODEL = "claude-haiku-4-5"
+
+# Papers below this score are treated as not relevant and dropped. Kept small
+# so borderline-but-related papers survive; clearly off-topic ones fall away.
+RANK_THRESHOLD = 0.15
+
+# How many papers to score per API call. Keeps each prompt bounded so we stay
+# well within context/output limits; larger libraries are split into batches.
+RANK_BATCH_SIZE = 40
+
+# Characters of body text sent per paper. Enough for Claude to judge the
+# subject matter without shipping whole papers (which would blow up cost).
+RANK_SNIPPET_CHARS = 700
+
+# The structured-output contract. Forcing this tool means Claude must answer
+# with schema-valid JSON (an array of {id, score, reason}) instead of prose we
+# would have to parse by hand.
+_RANK_TOOL = {
+    "name": "record_relevance",
+    "description": (
+        "Record how relevant each paper is to the research topic. Include one "
+        "entry for every paper you were given, using its exact numeric id."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "rankings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "id": {
+                            "type": "integer",
+                            "description": "The paper's numeric id.",
+                        },
+                        "score": {
+                            "type": "number",
+                            "description": (
+                                "Relevance from 0.0 (unrelated) to 1.0 "
+                                "(directly on-topic)."
+                            ),
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "One short line explaining the score.",
+                        },
+                    },
+                    "required": ["id", "score", "reason"],
+                },
+            }
+        },
+        "required": ["rankings"],
+    },
+}
+
+_RANK_SYSTEM_PROMPT = (
+    "You are a research librarian judging how relevant papers are to a "
+    "research topic. Judge by CONCEPTUAL relevance - what the paper is "
+    "actually about - not by whether it repeats the topic's exact words. A "
+    "paper can be highly relevant even if it shares no vocabulary with the "
+    "topic (for example, a 'silicon detector' or 'charged-particle energy in "
+    "the atmosphere' paper is relevant to 'muon tomography'). Score every "
+    "paper you are given by calling the record_relevance tool."
+)
+
+
+def _rank_catalog(papers: list[dict]) -> str:
+    """Render a compact, token-bounded catalog of papers for the prompt."""
+    lines: list[str] = []
+    for p in papers:
+        keywords = ", ".join(p.get("keywords", []))
+        snippet = re.sub(r"\s+", " ", p.get("text", "")).strip()[:RANK_SNIPPET_CHARS]
+        lines.append(
+            f"[id={p['id']}] {p['title']}\n"
+            f"  keywords: {keywords or '(none)'}\n"
+            f"  excerpt: {snippet or '(no text)'}"
+        )
+    return "\n\n".join(lines)
+
+
+def _rank_batch(client, model: str, topic: str, papers: list[dict]) -> dict[int, dict]:
+    """Score one batch of papers via Claude. Returns {id: {score, reason}}.
+
+    Raises on any API/parse failure so the caller can fall back to lexical.
+    """
+    user_content = (
+        f"RESEARCH TOPIC: {topic}\n\n"
+        f"PAPERS:\n{_rank_catalog(papers)}\n\n"
+        "Call record_relevance with a score and one-line reason for every "
+        "paper above."
+    )
+    response = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        system=_RANK_SYSTEM_PROMPT,
+        tools=[_RANK_TOOL],
+        tool_choice={"type": "tool", "name": "record_relevance"},
+        messages=[{"role": "user", "content": user_content}],
+    )
+
+    results: dict[int, dict] = {}
+    for block in response.content:
+        if getattr(block, "type", None) != "tool_use":
+            continue
+        for row in block.input.get("rankings", []):
+            try:
+                pid = int(row["id"])
+                score = float(row["score"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            results[pid] = {
+                "score": max(0.0, min(1.0, score)),
+                "reason": str(row.get("reason", "")).strip(),
+            }
+    return results
+
+
+def rank_by_topic_llm(
+    topic: str,
+    papers: list[dict],
+    api_key: str | None,
+    model: str = RANK_MODEL,
+    top_n: int | None = None,
+    client=None,
+) -> list[dict]:
+    """Rank papers by SEMANTIC relevance to `topic`, judged by Claude.
+
+    Unlike :func:`rank_by_topic` (which is purely lexical TF-IDF), this asks a
+    fast Haiku-class model to judge each paper's relevance by meaning, so a
+    conceptually-related paper that shares no words with the topic can still
+    surface. Each returned dict gains a ``score`` (0-1) and a short ``reason``.
+
+    Robustness first: on ANY failure - no API key, network/API error, or
+    unparseable output - this falls back to the lexical
+    :func:`rank_by_topic` so the feature never hard-fails.
+    """
+    if not papers:
+        return []
+    if not api_key and client is None:
+        return rank_by_topic(topic, papers, top_n)
+
+    try:
+        if client is None:
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=api_key)
+
+        scores: dict[int, dict] = {}
+        for start in range(0, len(papers), RANK_BATCH_SIZE):
+            batch = papers[start:start + RANK_BATCH_SIZE]
+            scores.update(_rank_batch(client, model, topic, batch))
+
+        if not scores:
+            # Nothing usable came back; degrade to lexical rather than return
+            # an empty list.
+            return rank_by_topic(topic, papers, top_n)
+
+        ranked = []
+        for p in papers:
+            hit = scores.get(p["id"])
+            if hit and hit["score"] >= RANK_THRESHOLD:
+                ranked.append({**p, "score": hit["score"], "reason": hit["reason"]})
+        ranked.sort(key=lambda p: p["score"], reverse=True)
+        return ranked[:top_n] if top_n else ranked
+    except Exception:
+        # Any API/network/parse error -> lexical fallback keeps the UI working.
+        return rank_by_topic(topic, papers, top_n)
+
+
+# --------------------------------------------------------------------------
 # Generation: send retrieved context + question to Claude.
 # --------------------------------------------------------------------------
 

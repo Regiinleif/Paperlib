@@ -7,6 +7,12 @@ __pycache__/
 venv/
 env/
 
+# Build / packaging artifacts (PaperLib.spec and installer/PaperLib.iss are
+# source and are intentionally NOT ignored)
+build/
+dist/
+release/
+
 # Personal data — NEVER commit your papers or your API key
 /papers/*
 !/papers/.gitkeep
