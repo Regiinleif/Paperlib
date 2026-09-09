@@ -1,6 +1,6 @@
 """Tests for text extraction and keyword categorization."""
 
-from paperlib import extract
+from src import extract
 
 
 def test_extract_keywords_ignores_stopwords():

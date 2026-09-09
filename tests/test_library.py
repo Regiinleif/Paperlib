@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from paperlib import config, library
+from src import config, library
 
 
 @pytest.fixture

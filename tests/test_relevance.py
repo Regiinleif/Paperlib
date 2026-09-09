@@ -7,7 +7,7 @@ network call is made. The fallback paths construct no client at all.
 
 import re
 
-from paperlib import rag
+from src import rag
 
 
 # --- a fake Anthropic client -------------------------------------------------

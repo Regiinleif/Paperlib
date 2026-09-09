@@ -2,7 +2,7 @@
 
 import threading
 
-from paperlib import rag
+from src import rag
 
 
 def test_chunk_text_overlaps():

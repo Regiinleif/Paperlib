@@ -73,7 +73,7 @@ Desktop shortcut.)
 
 ## How the RAG works (the learning part)
 
-See `paperlib/rag.py`. The pipeline is:
+See `src/rag.py`. The pipeline is:
 
 1. **Chunk** each paper into overlapping ~900-char passages.
 2. **Retrieve** the top-k passages for your question using TF-IDF cosine
@@ -92,7 +92,7 @@ embedding-backed store; the rest of the app only calls `add_document()` and
 paperlib/            (project root)
   papers/            # your PDFs live here (the drop box copies into it)
   data/              # library.db (metadata) + config.json (settings)
-  paperlib/
+  src/               # the application package
     app.py           # main window + drop box + library/projects
     project_window.py# research session window + chat
     library.py       # SQLite store

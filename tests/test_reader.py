@@ -1,10 +1,10 @@
-"""Tests for the PDF reflow logic (paperlib.reader).
+"""Tests for the PDF reflow logic (src.reader).
 
 These exercise the pure position/paragraph functions with synthetic fragment
 and line dicts, so no real PDF is needed.
 """
 
-from paperlib import reader
+from src import reader
 
 
 def _frag(t, x, y, size=10.0, bold=False):

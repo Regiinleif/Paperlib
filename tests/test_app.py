@@ -1,6 +1,6 @@
 """Tests for the pure, GUI-free bits of the main window (app.py)."""
 
-from paperlib.app import _import_summary
+from src.app import _import_summary
 
 
 def test_import_summary_basic():

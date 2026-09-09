@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from paperlib import config
+from src import config
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", data_dir / "library.db")
     monkeypatch.setattr(config, "CONFIG_PATH", data_dir / "config.json")
 
-    from paperlib.app import PaperLibApp
+    from src.app import PaperLibApp
 
     # Constructing the Tk root raises tk.TclError on a headless box (no display)
     # -> skip. tkinterdnd2 can also throw a *transient* TclError re-loading its

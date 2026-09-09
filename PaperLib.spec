@@ -34,8 +34,8 @@ for pkg in ("tkinterdnd2", "pypdfium2", "anthropic"):
 # Pillow's Tk image bridge is imported lazily, so name it explicitly.
 hiddenimports += ["PIL.ImageTk"]
 
-# Make sure every paperlib submodule is included.
-hiddenimports += collect_submodules("paperlib")
+# Make sure every src submodule is included.
+hiddenimports += collect_submodules("src")
 
 block_cipher = None
 

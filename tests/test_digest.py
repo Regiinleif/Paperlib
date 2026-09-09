@@ -2,7 +2,7 @@
 
 import pytest
 
-from paperlib import config, extract, library
+from src import config, extract, library
 
 
 @pytest.fixture

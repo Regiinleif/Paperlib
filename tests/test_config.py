@@ -6,7 +6,7 @@ temp location and the environment variable is controlled via monkeypatch.
 
 import pytest
 
-from paperlib import config
+from src import config
 
 
 @pytest.fixture
