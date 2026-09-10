@@ -138,8 +138,10 @@ def get_api_key() -> str | None:
     Resolution order (first non-empty wins):
       1. the real ANTHROPIC_API_KEY environment variable (a shell env var
          always wins),
-      2. ANTHROPIC_API_KEY from a ``.env`` file in the project root, and
-      3. the ``api_key`` the user saved through the Settings dialog in
+      2. ANTHROPIC_API_KEY from a ``.env`` file in the project root,
+      3. Azure Key Vault, if ``AZURE_KEY_VAULT_URL`` is set (this is how the
+         deployed Container App gets its key, via its managed identity), and
+      4. the ``api_key`` the user saved through the Settings dialog in
          data/config.json.
 
     Returns ``None`` if none of these provide a key.
@@ -152,9 +154,60 @@ def get_api_key() -> str | None:
     dotenv_key = load_dotenv_file().get("ANTHROPIC_API_KEY")
     if dotenv_key:
         return dotenv_key
-    # 3. Finally, the key saved via the Settings dialog.
+    # 3. Azure Key Vault (deployed app: managed identity + AZURE_KEY_VAULT_URL).
+    vault_key = _key_from_vault(os.environ.get("AZURE_KEY_VAULT_URL", ""))
+    if vault_key:
+        return vault_key
+    # 4. Finally, the key saved via the Settings dialog.
     return load_config().get("api_key") or None
 
 
 def get_model() -> str:
+    """Resolve the Claude model.
+
+    Order (first non-empty wins): the ``PAPERLIB_MODEL`` environment variable
+    (so a container can be pinned to a cheaper model without a config file),
+    then ``model`` in data/config.json, then :data:`DEFAULT_MODEL`.
+    """
+    env_model = os.environ.get("PAPERLIB_MODEL")
+    if env_model:
+        return env_model
     return load_config().get("model") or DEFAULT_MODEL
+
+
+# The Key Vault secret name the API key is stored under. Kept as a constant so
+# the deploy scripts and the code agree on one name.
+KEY_VAULT_SECRET_NAME = "anthropic-api-key"
+
+# Cache the key fetched from Key Vault so we don't make a network round-trip on
+# every request (get_api_key runs per chat/agent call). Keyed by vault URL.
+_vault_key_cache: dict[str, str] = {}
+
+
+def _key_from_vault(vault_url: str, client=None) -> str | None:
+    """Fetch the Anthropic API key from Azure Key Vault, or None on any failure.
+
+    Uses ``DefaultAzureCredential`` so it works with the Container App's managed
+    identity in Azure (and with ``az login`` / env creds locally). Robustness
+    first: a missing SDK, missing identity, network error or absent secret all
+    return None so key resolution can fall through instead of hard-failing. The
+    result is cached per vault URL. A ``client`` may be injected for tests.
+    """
+    if not vault_url:
+        return None
+    if vault_url in _vault_key_cache:
+        return _vault_key_cache[vault_url]
+    try:
+        if client is None:
+            from azure.identity import DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+
+            client = SecretClient(
+                vault_url=vault_url, credential=DefaultAzureCredential()
+            )
+        value = client.get_secret(KEY_VAULT_SECRET_NAME).value or None
+    except Exception:
+        return None
+    if value:
+        _vault_key_cache[vault_url] = value
+    return value

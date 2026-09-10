@@ -12,3 +12,8 @@ pypdf>=4.0               # PDF text extraction (ingest + retrieval)
 fastapi>=0.110           # REST + SSE backend
 uvicorn>=0.29            # ASGI server
 python-multipart>=0.0.9  # multipart parsing for POST /api/documents
+
+# --- Azure Key Vault (deployed app reads ANTHROPIC_API_KEY from a vault via
+#     its managed identity; optional locally — config.get_api_key falls back) ---
+azure-identity>=1.16     # DefaultAzureCredential (managed identity in Azure)
+azure-keyvault-secrets>=4.8  # SecretClient to fetch the API key from Key Vault
