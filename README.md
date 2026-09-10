@@ -4,8 +4,9 @@ A private, offline-first research-paper library with a Claude-powered **RAG**
 chat built in — drop in your PDFs, and ask questions that are answered with
 cited passages from your own papers.
 
-**Stack:** Python 3 · Tkinter (desktop GUI) · SQLite · Anthropic Claude SDK ·
-a from-scratch TF-IDF retrieval engine · pytest · PyInstaller (Windows build).
+**Stack:** Python 3 · FastAPI (REST + SSE backend) · HTML/JS dashboard · SQLite ·
+Anthropic Claude SDK · a from-scratch TF-IDF retrieval engine · pytest ·
+PyInstaller (Windows build). A legacy Tkinter desktop client is still included.
 
 The retrieval engine is written in plain Python (TF-IDF) rather than pulled
 from a library, so every step of the RAG pipeline — chunking, scoring,
@@ -19,17 +20,15 @@ through the official SDK.
 
 ## What it does
 
-- **Drop box** — drag downloaded PDFs (or `.txt`) onto the box at the top of
-  the window (or click to browse). Files are copied into `papers/`.
+- **Drop box** — drag downloaded PDFs (or `.txt`) onto the box in the dashboard
+  (or click to browse). Files are uploaded and copied into `papers/`.
 - **Automatic categorization** — each paper's text is extracted, its top
   keywords are pulled out, and it's filed under a keyword-derived category.
-- **Research project sessions** — click **Add Project Session**, give it a
-  topic, and a new window opens listing the papers in your library that match
-  that topic (plus a button to add any paper manually).
-- **RAG chat with Claude** — inside a session, ask questions or click
-  *Summarize these papers*. The app retrieves the most relevant passages from
-  exactly the papers in that session, feeds them to Claude as context, and
-  streams back a cited answer.
+  The dashboard shows live library stats grouped by category.
+- **RAG chat with Claude** — ask a question in the chat panel. The app
+  retrieves the most relevant passages across your library, feeds them to
+  Claude as context, and streams back a cited answer (each source tagged
+  `[S1]`, `[S2]`, …) token-by-token over Server-Sent Events.
 
 ## Setup
 
@@ -64,12 +63,37 @@ the key saved in `data/config.json`.
 
 ## Running
 
+PaperLib is a **web app**: a FastAPI backend that serves an HTML/JS dashboard.
+
 ```bash
-python run.py
+python run_api.py
 ```
 
-(Or, from a packaged Windows install, launch **PaperLib** from the Start menu /
-Desktop shortcut.)
+Then open <http://127.0.0.1:8000> in your browser. Drop a PDF onto the box,
+watch it get categorized, and ask questions in the chat panel — answers stream
+in token-by-token and cite the passages they came from.
+
+### API endpoints
+
+| Method | Path                | Purpose                                   |
+| ------ | ------------------- | ----------------------------------------- |
+| GET    | `/api/health`       | Liveness + whether a Claude key is set    |
+| GET    | `/api/library`      | Library stats + the full paper list       |
+| POST   | `/api/documents`    | Upload a `.pdf`/`.txt` and ingest it       |
+| POST   | `/api/chat`         | Question → full cited answer              |
+| GET    | `/api/chat/stream`  | Question → Server-Sent-Events token stream |
+| GET    | `/api/agent/stream` | Tool-calling agent → SSE search steps + answer |
+
+**Agent mode.** Tick *Agent mode* in the dashboard (or hit `/api/agent/stream`)
+to let Claude drive the retrieval itself: it's given a `search_library` tool and
+decides when and what to search, so it can do **multi-step retrieval** — search,
+read, refine, then answer — with the search steps streamed live. Plain chat
+(`/api/chat`) is the single-shot retrieve-then-answer path. See `src/agent.py`.
+
+### Legacy desktop client
+
+The original Tkinter GUI still runs (`python run.py`), but the web app above is
+now the primary interface.
 
 ## How the RAG works (the learning part)
 
@@ -93,14 +117,17 @@ paperlib/            (project root)
   papers/            # your PDFs live here (the drop box copies into it)
   data/              # library.db (metadata) + config.json (settings)
   src/               # the application package
-    app.py           # main window + drop box + library/projects
-    project_window.py# research session window + chat
+    api.py           # FastAPI backend: REST + SSE endpoints
+    static/          # the HTML/JS dashboard served by the backend
     library.py       # SQLite store
     extract.py       # PDF text + keyword extraction/categorization
     rag.py           # chunk -> retrieve -> augment -> generate
-    reader.py        # in-app PDF page reader
     config.py        # paths + settings
-  run.py             # entry point
+    app.py           # legacy Tkinter main window + drop box
+    project_window.py# legacy Tkinter research session window + chat
+    reader.py        # legacy in-app PDF page reader
+  run_api.py         # entry point (web app)
+  run.py             # entry point (legacy Tkinter GUI)
 ```
 
 ## Notes & limits (first draft)

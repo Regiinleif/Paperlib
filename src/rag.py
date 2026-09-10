@@ -362,11 +362,24 @@ def build_context(hits: list[tuple[Chunk, float]]) -> tuple[str, list[str]]:
 class RagChat:
     """Holds one conversation and answers questions against a retriever."""
 
-    def __init__(self, retriever: TfidfRetriever, api_key: str | None = None):
-        import anthropic
+    def __init__(
+        self,
+        retriever: TfidfRetriever,
+        api_key: str | None = None,
+        client=None,
+    ):
+        # Accept a pre-built client (used by tests and by callers that already
+        # hold one) so chat can be exercised with no key/network. Otherwise
+        # build the real Anthropic client from the resolved key.
+        if client is not None:
+            self.client = client
+        else:
+            import anthropic
 
+            self.client = (
+                anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+            )
         self.retriever = retriever
-        self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self.model = config.get_model()
         self.history: list[dict] = []
 

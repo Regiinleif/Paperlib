@@ -1,0 +1,55 @@
+# CI/CD pipeline for PaperLib.
+#
+# "CI" = Continuous Integration: every time code is pushed, GitHub automatically
+# installs the project and runs the test suite, so broken code is caught early.
+# This file tells GitHub *what* to run and *when*.
+#
+# You can watch each run under the "Actions" tab of the GitHub repo.
+
+name: CI
+
+# WHEN does this pipeline run?
+on:
+  push:
+    branches: [ main ]        # on every push to main
+  pull_request:               # and on every pull request
+  workflow_dispatch:          # and a manual "Run workflow" button in the UI
+
+jobs:
+  test:
+    name: Run tests
+    # WHERE it runs: a fresh Windows machine (matches PaperLib's target OS).
+    runs-on: windows-latest
+
+    # Test against multiple Python versions to catch version-specific breakage.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      # 1. Get the code onto the runner.
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # 2. Install the requested Python version.
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # 3. Install the app's dependencies plus the test runner.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      # 4. A quick syntax gate: every source file must at least compile.
+      - name: Syntax check
+        run: python -m compileall paperlib run.py
+
+      # 5. Run the test suite (logic only; no API key needed).
+      - name: Run pytest
+        run: pytest

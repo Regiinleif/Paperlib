@@ -31,3 +31,13 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# Local tooling / planning — not part of the app, kept out of the public repo
+.claude/
+todo.txt
+installtest/
+
+# Personal career docs (CV / job description) — never commit
+cv.tex
+*.tex
+JD.txt

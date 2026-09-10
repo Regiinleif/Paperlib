@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PaperLib</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --border: #2a2f3a;
+      --text: #e6e8ec; --muted: #9aa1ad; --accent: #6ea8fe; --accent-2: #3d7bff;
+      --ok: #57c98a; --err: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    header {
+      padding: 18px 24px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: baseline; gap: 12px;
+    }
+    header h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+    header .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+    header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); margin-right: 6px; vertical-align: middle; }
+    header .dot.ok { background: var(--ok); }
+    header .dot.err { background: var(--err); }
+    main { display: grid; grid-template-columns: 320px 1fr; gap: 20px; padding: 20px 24px; }
+    @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .panel h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--muted); }
+    .drop {
+      border: 1.5px dashed var(--border); border-radius: 10px; padding: 22px 14px;
+      text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+    }
+    .drop.drag { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
+    .drop input { display: none; }
+    .stats { display: flex; gap: 10px; margin: 14px 0; }
+    .stat { flex: 1; background: var(--panel-2); border-radius: 8px; padding: 10px; text-align: center; }
+    .stat .n { font-size: 22px; font-weight: 600; }
+    .stat .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .cats { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
+      padding: 3px 10px; font-size: 12px; color: var(--muted); }
+    .cat b { color: var(--text); }
+    .chat { display: flex; flex-direction: column; min-height: 62vh; }
+    .messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
+    .msg { max-width: 90%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; }
+    .msg.user { align-self: flex-end; background: var(--accent-2); color: #fff; }
+    .msg.bot { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+    .msg .sources { margin-top: 8px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 6px; }
+    .composer { display: flex; gap: 10px; margin-top: 14px; }
+    .composer input {
+      flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 10px; padding: 11px 14px; font-size: 15px;
+    }
+    .composer input:focus { outline: none; border-color: var(--accent); }
+    button {
+      background: var(--accent-2); color: #fff; border: 0; border-radius: 10px;
+      padding: 0 18px; font-size: 15px; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    .toast { color: var(--muted); font-size: 13px; min-height: 18px; margin-top: 8px; }
+    .empty { color: var(--muted); text-align: center; margin: auto; }
+    .agentToggle { display: flex; align-items: center; gap: 8px; margin-top: 10px;
+      font-size: 13px; color: var(--muted); cursor: pointer; }
+    .agentToggle span { color: #6b7280; }
+    .step { align-self: flex-start; max-width: 90%; font-size: 12.5px; color: var(--muted);
+      background: transparent; border-left: 2px solid var(--accent); padding: 2px 0 2px 10px; }
+    .step b { color: var(--accent); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PaperLib</h1>
+    <span style="color:var(--muted);font-size:13px">RAG over your own papers</span>
+    <span class="status"><span id="dot" class="dot"></span><span id="statusText">connecting…</span></span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Library</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".pdf,.txt" />
+        <div><b>Drop a PDF</b> or click to browse</div>
+        <div style="font-size:12px;margin-top:4px">.pdf or .txt</div>
+      </label>
+      <div class="toast" id="uploadToast"></div>
+      <div class="stats">
+        <div class="stat"><div class="n" id="total">0</div><div class="l">Papers</div></div>
+        <div class="stat"><div class="n" id="catCount">0</div><div class="l">Categories</div></div>
+      </div>
+      <div class="cats" id="cats"></div>
+    </section>
+
+    <section class="panel chat">
+      <h2>Ask your library</h2>
+      <div class="messages" id="messages">
+        <div class="empty" id="emptyState">Ask a question — answers cite the passages they came from.</div>
+      </div>
+      <form class="composer" id="composer">
+        <input id="q" placeholder="e.g. What methods are used for muon tomography?" autocomplete="off" />
+        <button id="send" type="submit">Ask</button>
+      </form>
+      <label class="agentToggle"><input type="checkbox" id="agentMode" /> Agent mode
+        <span>— Claude searches the library itself, in multiple steps</span></label>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const messages = $("messages");
+
+    async function refreshHealth() {
+      try {
+        const h = await (await fetch("/api/health")).json();
+        $("dot").className = "dot " + (h.has_api_key ? "ok" : "err");
+        $("statusText").textContent = h.has_api_key
+          ? `${h.model} · ${h.papers} papers`
+          : "no API key set";
+      } catch {
+        $("dot").className = "dot err";
+        $("statusText").textContent = "backend offline";
+      }
+    }
+
+    async function refreshLibrary() {
+      const lib = await (await fetch("/api/library")).json();
+      $("total").textContent = lib.total;
+      const cats = Object.entries(lib.categories).sort((a, b) => b[1] - a[1]);
+      $("catCount").textContent = cats.length;
+      $("cats").innerHTML = cats
+        .map(([c, n]) => `<span class="cat">${escapeHtml(c)} <b>${n}</b></span>`)
+        .join("");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function addMessage(cls, text) {
+      $("emptyState")?.remove();
+      const el = document.createElement("div");
+      el.className = "msg " + cls;
+      el.textContent = text;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+      return el;
+    }
+
+    // ---- upload -------------------------------------------------------------
+    const drop = $("drop"), fileInput = $("file");
+    ["dragenter", "dragover"].forEach((e) =>
+      drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("drag"); }));
+    ["dragleave", "drop"].forEach((e) =>
+      drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.remove("drag"); }));
+    drop.addEventListener("drop", (ev) => uploadFile(ev.dataTransfer.files[0]));
+    fileInput.addEventListener("change", () => uploadFile(fileInput.files[0]));
+
+    async function uploadFile(file) {
+      if (!file) return;
+      const toast = $("uploadToast");
+      toast.textContent = `Uploading ${file.name}…`;
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const res = await fetch("/api/documents", { method: "POST", body: form });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "upload failed");
+        toast.textContent = `Added "${data.title}" → ${data.category}`;
+        refreshLibrary(); refreshHealth();
+      } catch (err) {
+        toast.textContent = "Error: " + err.message;
+      }
+    }
+
+    // ---- chat (SSE streaming), plain or agent mode -------------------------
+    function addStep(html) {
+      $("emptyState")?.remove();
+      const el = document.createElement("div");
+      el.className = "step";
+      el.innerHTML = html;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function attachSources(bot, src) {
+      if (!src || !src.length) return;
+      const div = document.createElement("div");
+      div.className = "sources";
+      div.textContent = "Sources: " + src.join("  ·  ");
+      bot.appendChild(div);
+    }
+
+    $("composer").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const q = $("q").value.trim();
+      if (!q) return;
+      addMessage("user", q);
+      $("q").value = "";
+      $("send").disabled = true;
+
+      const agent = $("agentMode").checked;
+      const url = agent
+        ? `/api/agent/stream?question=${encodeURIComponent(q)}`
+        : `/api/chat/stream?question=${encodeURIComponent(q)}`;
+      const es = new EventSource(url);
+      let bot = agent ? null : addMessage("bot", "");
+
+      // Text can arrive as `token` (chat) or `text` (agent); ensure a bubble.
+      const appendText = (t) => {
+        if (!bot) bot = addMessage("bot", "");
+        bot.textContent += t;
+        messages.scrollTop = messages.scrollHeight;
+      };
+      es.addEventListener("token", (e) => appendText(JSON.parse(e.data).text));
+      es.addEventListener("text", (e) => appendText(JSON.parse(e.data).text));
+
+      // Agent-only steps.
+      es.addEventListener("tool_call", (e) => {
+        addStep(`<b>🔍 search</b> "${escapeHtml(JSON.parse(e.data).query)}"`);
+      });
+      es.addEventListener("tool_result", (e) => {
+        addStep(`↳ ${JSON.parse(e.data).hits} passage(s) found`);
+      });
+      es.addEventListener("note", (e) => addStep(escapeHtml(JSON.parse(e.data).text)));
+
+      es.addEventListener("sources", (e) => attachSources(bot || addMessage("bot", ""), JSON.parse(e.data).sources));
+
+      // Server reported a real error (e.g. API/billing) mid-stream.
+      let hadError = false;
+      es.addEventListener("stream_error", (e) => {
+        hadError = true;
+        addStep(`⚠ ${escapeHtml(JSON.parse(e.data).message)}`);
+      });
+      es.addEventListener("done", () => { es.close(); $("send").disabled = false; });
+      es.onerror = () => {
+        es.close();
+        // Only show the generic hint if the server didn't already tell us why.
+        if (!hadError && (!bot || !bot.textContent)) {
+          appendText("(connection error — is the server running?)");
+        }
+        $("send").disabled = false;
+      };
+    });
+
+    refreshHealth();
+    refreshLibrary();
+    setInterval(refreshHealth, 15000);
+  </script>
+</body>
+</html>
