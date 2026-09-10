@@ -36,8 +36,3 @@ Thumbs.db
 .claude/
 todo.txt
 installtest/
-
-# Personal career docs (CV / job description) — never commit
-cv.tex
-*.tex
-JD.txt
