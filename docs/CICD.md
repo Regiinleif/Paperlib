@@ -29,9 +29,12 @@ the software, for example building an installer or publishing a release. The
 "delivery" flavor prepares a release for a human to click "ship"; the
 "deployment" flavor ships it automatically.
 
-> PaperLib currently has the **CI** half fully set up (automated testing).
-> It does not yet have a **CD** step — see [Section 5](#5-ideas-to-extend-it)
-> for how you could add one.
+> PaperLib now has **both halves**. CI runs the test suite on every push and
+> pull request. CD then builds the web app into a Docker image, pushes it to
+> the GitHub Container Registry (ghcr.io), and — on pushes to `main` —
+> automatically deploys that image to Azure Container Apps. See
+> [Section 5](#5-the-cd-half-build--deploy) for how the build-and-deploy jobs
+> work.
 
 ---
 
@@ -234,10 +237,42 @@ gh run view --log    # print the full logs of a run
 
 ---
 
-## 5. Ideas to extend it
+## 5. The CD half (build & deploy)
 
-The current pipeline is a solid CI foundation. Here are natural next steps as
-you learn more — the first two strengthen CI; the last is the "CD" half.
+After the `test` job goes green, two more jobs run the "delivery" half of the
+pipeline.
+
+### The `docker` job — build & push the image
+
+`needs: test` ties it to the tests, so it runs **only if the tests passed**. It
+builds the web app into a Docker image and, **on pushes to `main` only** (not on
+pull requests, so a fork's PR can never publish), pushes it to the GitHub
+Container Registry at `ghcr.io/<owner>/paperlib`. Each image is tagged both
+`latest` and `sha-<short commit>` (e.g. `sha-55b6630`), so every commit has a
+uniquely addressable image.
+
+### The `deploy` job — ship it to Azure
+
+`needs: docker` and `if: github.event_name == 'push'`, so it runs only after a
+successful build on `main`. It logs in to Azure using the `AZURE_CREDENTIALS`
+secret (a service principal scoped to the `paperlib` resource group), then runs
+`az containerapp update` to point the live app at the image tagged with this
+commit's `sha-<short>`. Azure already holds the ghcr.io pull credential and the
+app's environment + Key Vault config, so only the image reference changes.
+
+The net effect: **push to `main` → tests → image built → live site updated**,
+with no manual step. The manual fallback still works if you ever need it:
+
+```bash
+az containerapp update -n paperlib -g paperlib \
+  --image ghcr.io/<owner>/paperlib:sha-$(git rev-parse --short HEAD)
+```
+
+---
+
+## 6. Ideas to extend it further
+
+Natural next steps as you learn more — both strengthen CI.
 
 ### Add linting (e.g. ruff)
 
@@ -263,22 +298,18 @@ you which parts are untested:
     pytest --cov=paperlib --cov-report=term-missing
 ```
 
-### Add a release / deploy step (the "CD" half)
+### Package the desktop client as an `.exe`
 
-To cross from CI into CD, add a job that builds a distributable version of the
-app after the tests pass. For a Windows Tkinter app, that often means bundling
-it into a single `.exe` with a tool like PyInstaller, then attaching it to a
-GitHub Release. A common pattern is to trigger this only when you push a
-version tag (like `v1.0.0`), so releases are deliberate:
+The deployed web app covers the server side. For the legacy Tkinter desktop
+client, a release job could bundle it into a single `.exe` with PyInstaller and
+attach it to a GitHub Release, typically triggered only on a version tag (like
+`v1.0.0`) so releases are deliberate:
 
 ```yaml
 on:
   push:
     tags: [ 'v*' ]
 ```
-
-That closes the loop: code is pushed, automatically tested, and — once you add
-this — automatically packaged and delivered.
 
 ---
 
