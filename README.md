@@ -108,6 +108,20 @@ storage. On pushes to `main`, GitHub Actions builds this image and pushes it to
 `ghcr.io/<owner>/paperlib` (see `.github/workflows/ci.yml`); an Azure Container
 Apps deploy can pull that image.
 
+### Live deployment (Azure Container Apps)
+
+A live instance runs on Azure Container Apps (region `japaneast`, scale-to-zero).
+Azure only *pulls* the image built by CI from ghcr.io. Two things worth noting:
+
+- **API key via Key Vault, not plaintext.** The app's managed identity reads the
+  Anthropic key from Azure Key Vault at runtime (`AZURE_KEY_VAULT_URL` env +
+  `get_api_key` in `src/config.py`); there is no `ANTHROPIC_API_KEY` in the app
+  config. Model is pinned with `PAPERLIB_MODEL` (e.g. `claude-haiku-4-5`).
+- **Ephemeral storage.** The instance runs with an empty library that resets per
+  revision. An Azure Files mount for the SQLite DB was tried and reverted —
+  SQLite-over-SMB deadlocks (`database is locked`) when two revisions overlap
+  during a rolling deploy. Durable persistence would need a managed database.
+
 ### Legacy desktop client
 
 The original Tkinter GUI still runs (`python run.py`), but the web app above is
