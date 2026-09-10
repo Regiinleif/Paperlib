@@ -254,11 +254,13 @@ uniquely addressable image.
 ### The `deploy` job — ship it to Azure
 
 `needs: docker` and `if: github.event_name == 'push'`, so it runs only after a
-successful build on `main`. It logs in to Azure using the `AZURE_CREDENTIALS`
-secret (a service principal scoped to the `paperlib` resource group), then runs
-`az containerapp update` to point the live app at the image tagged with this
-commit's `sha-<short>`. Azure already holds the ghcr.io pull credential and the
-app's environment + Key Vault config, so only the image reference changes.
+successful build on `main`. It logs in with `az login --service-principal`
+using three repository secrets — `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, and
+`AZURE_TENANT_ID` (a service principal scoped to the `paperlib` resource group)
+— then runs `az containerapp update` to point the live app at the image tagged
+with this commit's `sha-<short>`. Azure already holds the ghcr.io pull
+credential and the app's environment + Key Vault config, so only the image
+reference changes.
 
 The net effect: **push to `main` → tests → image built → live site updated**,
 with no manual step. The manual fallback still works if you ever need it:

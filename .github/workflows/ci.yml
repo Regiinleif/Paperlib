@@ -117,13 +117,16 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Log in to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Update the Container App to the new image
+      - name: Deploy the new image to Azure Container Apps
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
+          # Log in as the deploy service principal (scoped to the paperlib RG).
+          az login --service-principal \
+            -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" \
+            --output none
           image=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           short=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "Deploying ${image}:sha-${short}"
