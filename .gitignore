@@ -35,4 +35,5 @@ Thumbs.db
 # Local tooling / planning — not part of the app, kept out of the public repo
 .claude/
 todo.txt
+progress.txt
 installtest/
