@@ -1,0 +1,37 @@
+[
+  {
+    "question": "How is muon tomography used to image the interior of active volcanoes?",
+    "relevant": ["jacques", "Geophysical_muon_imaging", "volcano"],
+    "note": "Volcano muography feasibility and applications."
+  },
+  {
+    "question": "What limits the resolution and feasibility of geophysical muon imaging through thick rock?",
+    "relevant": ["Geophysical_muon_imaging"],
+    "note": "Feasibility-and-limits paper on muon telescopes through rock."
+  },
+  {
+    "question": "How does a SiPM readout of plastic scintillating fibres detect muon tracks?",
+    "relevant": ["SiPM", "PlasticScinPerf", "scintillating"],
+    "note": "Multiplexed SiPM / SciFi detector papers."
+  },
+  {
+    "question": "What is the design of a borehole muon detector for underground density mapping?",
+    "relevant": ["borehole"],
+    "note": "Borehole muon detector paper."
+  },
+  {
+    "question": "What is the parametrization of the sea-level muon energy spectrum and its flux?",
+    "relevant": ["Bugaev", "Reyna"],
+    "note": "Cosmic-ray muon spectrum/flux parametrizations."
+  },
+  {
+    "question": "How is angular resolution simulated for a muon tomography detector?",
+    "relevant": ["calcuExample", "borehole", "SiPM"],
+    "note": "Simulation / angular-resolution content across detector papers."
+  },
+  {
+    "question": "What mathematical methods are used to solve integrals and special functions in physics?",
+    "relevant": ["Mathematical Methods", "ArfKen"],
+    "note": "Arfken reference text; sanity check for an off-topic-from-muons query."
+  }
+]

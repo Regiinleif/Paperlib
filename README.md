@@ -90,6 +90,24 @@ decides when and what to search, so it can do **multi-step retrieval** — searc
 read, refine, then answer — with the search steps streamed live. Plain chat
 (`/api/chat`) is the single-shot retrieve-then-answer path. See `src/agent.py`.
 
+### Run in Docker
+
+The web app is containerized (the legacy Tkinter client is not — a container
+has no display):
+
+```bash
+docker build -t paperlib .
+docker run --rm -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... paperlib
+```
+
+Then open <http://127.0.0.1:8000>. The image installs only the slim server
+subset of dependencies (`requirements-web.txt`), runs as a non-root user, and
+has a `/api/health` container health check. Uploaded papers and the database
+live under `/app/data` and `/app/papers` — mount volumes there for durable
+storage. On pushes to `main`, GitHub Actions builds this image and pushes it to
+`ghcr.io/<owner>/paperlib` (see `.github/workflows/ci.yml`); an Azure Container
+Apps deploy can pull that image.
+
 ### Legacy desktop client
 
 The original Tkinter GUI still runs (`python run.py`), but the web app above is
@@ -110,6 +128,32 @@ To upgrade to vector embeddings later, replace `TfidfRetriever` with an
 embedding-backed store; the rest of the app only calls `add_document()` and
 `retrieve()`.
 
+## Evaluating the pipeline
+
+A change to chunking, `k`, or the model should be judged by numbers, not vibes.
+`src/evaluate.py` scores the RAG pipeline against a small labeled question set
+(`evals/questions.json`):
+
+```bash
+python run_eval.py            # retrieval metrics only — pure local, no API cost
+python run_eval.py --answer   # also generate + grade answers (needs a key)
+python run_eval.py --k 8      # try a different retrieval depth
+```
+
+It measures two things:
+
+- **Retrieval** — `recall@k` (of the papers labeled relevant, how many made the
+  top-k?) and `hit@k` (did at least one relevant paper make it?). No API key
+  needed.
+- **Answer grounding** (with `--answer`) — *citation faithfulness* (every `[S#]`
+  the answer cites is a source that was actually retrieved — no hallucinated
+  references), *citation relevance* (it cited a labeled-relevant paper), and the
+  *grounded rate* (it cited anything at all).
+
+A label is just a substring matched against a paper's filename or title, so the
+question set is portable across libraries — paper ids differ, but "borehole"
+still finds the borehole paper.
+
 ## Project layout
 
 ```
@@ -122,11 +166,16 @@ paperlib/            (project root)
     library.py       # SQLite store
     extract.py       # PDF text + keyword extraction/categorization
     rag.py           # chunk -> retrieve -> augment -> generate
+    agent.py         # Claude tool-calling agent (multi-step retrieval)
+    evaluate.py      # model-evaluation harness (retrieval + citation metrics)
     config.py        # paths + settings
     app.py           # legacy Tkinter main window + drop box
     project_window.py# legacy Tkinter research session window + chat
     reader.py        # legacy in-app PDF page reader
+  evals/
+    questions.json   # labeled question set for the evaluation harness
   run_api.py         # entry point (web app)
+  run_eval.py        # entry point (evaluation harness)
   run.py             # entry point (legacy Tkinter GUI)
 ```
 

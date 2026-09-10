@@ -1,0 +1,44 @@
+# Keep the build context small and secrets out of the image.
+
+# Version control / CI
+.git/
+.github/
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+release/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Secrets and personal data — must NEVER enter the image
+.env
+*.env
+data/
+papers/
+seed/
+
+# Desktop-client packaging (not used by the container)
+installer/
+PaperLib.spec
+run.py
+
+# Local tooling / docs not needed at runtime
+.claude/
+docs/
+todo.txt
+tests/
+installtest/
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

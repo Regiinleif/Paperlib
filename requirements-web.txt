@@ -1,0 +1,14 @@
+# Runtime dependencies for the containerized web app ONLY.
+#
+# This is the slim subset of requirements.txt needed to SERVE the FastAPI
+# backend + dashboard (src/api.py). It deliberately omits the legacy Tkinter
+# desktop client's deps (pypdfium2, pillow, tkinterdnd2), which pull in GUI
+# libraries the server never imports — keeping the Docker image small.
+#
+# If you add a dependency that src/api.py (or anything it imports) needs at
+# runtime, add it here too, not just in requirements.txt.
+anthropic>=0.40          # Claude API SDK (RAG chat + agent)
+pypdf>=4.0               # PDF text extraction (ingest + retrieval)
+fastapi>=0.110           # REST + SSE backend
+uvicorn>=0.29            # ASGI server
+python-multipart>=0.0.9  # multipart parsing for POST /api/documents
